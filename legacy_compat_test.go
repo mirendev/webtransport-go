@@ -13,16 +13,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const settingsEnableWebtransportDraft06 = 0x2b603742
+
 func TestLegacyOptInDoesNotBypassModernRequirements(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		settings map[uint64]uint64
 		want     string
 	}{
-		{"modern peer without partial resets", map[uint64]uint64{settingsWebTransportEnabled: 1, 0x2b603742: 1}, "server didn't enable QUIC stream reset partial delivery"},
-		{"modern explicitly disabled", map[uint64]uint64{settingsWebTransportEnabled: 0, 0x2b603742: 1}, "server didn't enable WebTransport"},
+		{"modern peer without partial resets", map[uint64]uint64{settingsWebTransportEnabled: 1, settingsEnableWebtransportDraft06: 1}, "server didn't enable QUIC stream reset partial delivery"},
+		{"modern explicitly disabled", map[uint64]uint64{settingsWebTransportEnabled: 0, settingsEnableWebtransportDraft06: 1}, "server didn't enable WebTransport"},
 		{"no WebTransport advertisement", map[uint64]uint64{}, "server didn't enable WebTransport"},
-		{"invalid legacy value", map[uint64]uint64{0x2b603742: 2}, "server didn't enable WebTransport"},
+		{"invalid legacy value", map[uint64]uint64{settingsEnableWebtransportDraft06: 2}, "server didn't enable WebTransport"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -83,7 +85,7 @@ func TestLegacyHandshakeSelection(t *testing.T) {
 			require.NoError(t, err)
 			defer ln.Close()
 			requests := make(chan *http.Request, 1)
-			settings := map[uint64]uint64{0x2b603742: 1}
+			settings := map[uint64]uint64{settingsEnableWebtransportDraft06: 1}
 			if tc.modern {
 				settings[settingsWebTransportEnabled] = 1
 			}
