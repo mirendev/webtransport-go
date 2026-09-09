@@ -17,6 +17,10 @@ import (
 // Dial creates a new QUIC connection for each session. To establish multiple
 // sessions on one QUIC connection, use NewClientConn.
 type Transport struct {
+	// AllowLegacyDraft06 permits servers advertising only the draft-06 setting.
+	// Peers without partial resets retain ordinary QUIC reset semantics.
+	AllowLegacyDraft06 bool
+
 	// Config is the WebTransport configuration used for new sessions.
 	Config *Config
 

@@ -19,6 +19,7 @@ import (
 // A ClientConn is a WebTransport client connection.
 // Multiple sessions can be established concurrently on a ClientConn.
 type ClientConn struct {
+	allowLegacyDraft06   bool
 	conn                 *quic.Conn
 	clientConn           *http3.RawClientConn
 	sessMgr              *sessionManager
@@ -30,7 +31,8 @@ type ClientConn struct {
 var _ http.RoundTripper = &ClientConn{}
 
 // NewClientConn creates a WebTransport client connection on an existing QUIC connection.
-// The QUIC connection must have datagrams and stream reset partial delivery enabled on both endpoints.
+// The QUIC connection must have datagrams and stream reset partial delivery enabled on both endpoints,
+// except that AllowLegacyDraft06 permits legacy peers without stream reset partial delivery.
 // It must only be called once per QUIC connection.
 // The caller owns the QUIC connection and closes it when done.
 func (d *Transport) NewClientConn(qconn *quic.Conn) (*ClientConn, error) {
@@ -59,6 +61,7 @@ func (d *Transport) NewClientConn(qconn *quic.Conn) (*ClientConn, error) {
 	context.AfterFunc(qconn.Context(), sessMgr.Close)
 
 	c := &ClientConn{
+		allowLegacyDraft06:   d.AllowLegacyDraft06,
 		conn:                 qconn,
 		clientConn:           tr.NewRawClientConn(qconn),
 		sessMgr:              sessMgr,
@@ -191,7 +194,7 @@ func (c *ClientConn) dial(ctx context.Context, u *url.URL, reqHdr http.Header) (
 	if !state.SupportsDatagrams.Remote {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable QUIC datagram support"}
 	}
-	if !state.SupportsStreamResetPartialDelivery.Remote {
+	if !c.allowLegacyDraft06 && !state.SupportsStreamResetPartialDelivery.Remote {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable QUIC stream reset partial delivery"}
 	}
 
@@ -214,10 +217,20 @@ func (c *ClientConn) dial(ctx context.Context, u *url.URL, reqHdr http.Header) (
 	if settings.Other == nil {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable WebTransport"}
 	}
-	// any non-zero value for SETTINGS_WT_ENABLED means that WebTransport is enabled
-	s, ok := settings.Other[settingsWebTransportEnabled]
-	if !ok || s == 0 {
-		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable WebTransport"}
+	// Prefer the current draft. Only opt into the legacy handshake when the
+	// modern setting is absent and the server explicitly advertises draft-06.
+	modern, modernPresent := settings.Other[settingsWebTransportEnabled]
+	legacy := c.allowLegacyDraft06 && !modernPresent && settings.Other[settingsEnableWebtransportDraft06] == 1
+	if !legacy {
+		if !modernPresent || modern == 0 {
+			return nil, nil, &RequirementsNotMetError{Message: "server didn't enable WebTransport"}
+		}
+		if !state.SupportsStreamResetPartialDelivery.Remote {
+			return nil, nil, &RequirementsNotMetError{Message: "server didn't enable QUIC stream reset partial delivery"}
+		}
+	} else {
+		req.Proto = protocolHeaderLegacy
+		req.Header.Set("Sec-Webtransport-Http3-Draft02", "1")
 	}
 
 	requestStr, err := c.clientConn.OpenRequestStream(ctx)
