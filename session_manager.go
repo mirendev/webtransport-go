@@ -170,6 +170,13 @@ func (m *sessionManager) AddSession(qconn *http3.Conn, id sessionID, str http3St
 
 	m.mx.Lock()
 	defer m.mx.Unlock()
+	// A closed session retains its HTTP/3 connection and stream buffers until
+	// it is removed from the registry. Connection closure also ends the session.
+	context.AfterFunc(conn.Context(), func() {
+		m.mx.Lock()
+		defer m.mx.Unlock()
+		m.maybeDelete(connTracingID, id)
+	})
 
 	sessions, ok := m.conns[connTracingID]
 	if !ok {
